@@ -1,0 +1,40 @@
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
+require('dotenv').config();
+
+const dbPath = process.env.DB_PATH || path.join(__dirname, 'database.sqlite');
+
+const db = new sqlite3.Database(dbPath, (err) => {
+  if (err) {
+    console.error('Error connecting to database:', err.message);
+  } else {
+    console.log('Connected to the SQLite database.');
+    initializeSchema();
+  }
+});
+
+function initializeSchema() {
+  db.serialize(() => {
+    db.run(`CREATE TABLE IF NOT EXISTS conversations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    db.run(`CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      conversation_id INTEGER,
+      sender TEXT CHECK(sender IN ('user', 'agent')),
+      content TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (conversation_id) REFERENCES conversations (id)
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating messages table:', err.message);
+      } else {
+        console.log('Database schema initialized.');
+      }
+    });
+  });
+}
+
+module.exports = db;
