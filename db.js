@@ -31,7 +31,20 @@ function initializeSchema() {
       if (err) {
         console.error('Error creating messages table:', err.message);
       } else {
-        console.log('Database schema initialized.');
+        console.log('Messages table initialized.');
+      }
+    });
+
+    db.run(`CREATE TABLE IF NOT EXISTS code_snippets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      filename TEXT,
+      content TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating code_snippets table:', err.message);
+      } else {
+        console.log('Code snippets table initialized.');
       }
     });
   });
