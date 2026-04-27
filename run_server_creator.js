@@ -4,36 +4,60 @@ const { executeSql } = require('./sqlTool');
 
 // Define the tools for this agent
 const tools = {
-  sql_insert_code: sqlInsertCode,
+  sql_insert_code: (args) => sqlInsertCode({ ...args, prompt_id: args.prompt_id || id }),
   sql_query: executeSql
 };
 
-// System prompt for the specialized agent
-const systemPrompt = `You are a specialized Node.js server creator.
-Your goal is to write a valid Express.js server that listens on 0.0.0.0:10001.
-After writing the code, you MUST use the 'sql_insert_code' tool to save it into the database.
-
-The 'sql_insert_code' tool takes three arguments: 'filename', 'content', and 'prompt'.
-Example format:
-Action: sql_insert_code | filename: server.js | content: <the code content> | prompt: <the prompt used>
-
-Example of a successful interaction:
-Thought: I will write the Express server and then save it to the database.
-Action: sql_insert_code | filename: server.js | content: const express = require('express'); ... | prompt: Write a simple Express.js server...
-Observation: { success: true, message: 'Query executed successfully' }
-Thought: I have successfully saved the server code.
-Final Answer: The server code has been saved to the database.
-`;
+async function saveCodeToDatabase(promptId, content) {
+  try {
+    // Strip HTML tags and escape single quotes for SQL
+    const cleanedContent = content
+      .replace(/<code[^>]*>/g, '')
+      .replace(/<\/code>/g, '')
+      .replace(/\\'/g, "'")  // Unescape backslash-escaped quotes
+      .replace(/''/g, "'");   // Fix double single quotes from agent
+    
+    const finalContent = cleanedContent.replace(/'/g, "''");
+    const insertQuery = `INSERT INTO code_snippets (filename, content, prompt_id) VALUES ('server.js', '${finalContent}', ${promptId})`;
+    await executeSql(insertQuery);
+    console.log(`Code saved to database with prompt_id: ${promptId}`);
+  } catch (error) {
+    console.error(`Error saving to database: ${error.message}`);
+  }
+}
 
 async function main() {
-  const agent = new Agent(systemPrompt, tools);
+  const idArg = process.argv[2];
+  const id = parseInt(idArg, 10);
+
+  if (isNaN(id)) {
+    console.error("Usage: node run_server_creator.js <prompt_id>");
+    process.exit(1);
+  }
+
+  let userPrompt = "";
+  try {
+    const rows = await executeSql(`SELECT content FROM prompts WHERE id = ${id}`);
+    if (rows && rows.length > 0) {
+      userPrompt = rows[0].content;
+    } else {
+      console.error(`Error: Prompt with ID ${id} not found.`);
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error(`Error fetching prompt: ${error.message}`);
+    process.exit(1);
+  }
+
+  const systemPrompt = `Your current prompt ID is ${id}. When using sql_insert_code, if you want to link to this prompt, use prompt_id: ${id} instead of prompt: <string>.`;
+  const agent = new Agent(systemPrompt, tools);  
   
-  const userPrompt = process.argv[2] || "Write a simple Express.js server that listens on 0.0.0.0:10001 and returns 'Hello World' at the root path. Save it with filename 'server.js'.";
-  
-  console.log("Starting serverNodejsCreator agent...");
+  console.log(`Starting serverNodejsCreator agent with prompt ID ${id}...`);
   try {
     const result = await agent.run(userPrompt);
     console.log("\nAgent finished with result:", result);
+    // Automatically save the result to database
+    await saveCodeToDatabase(id, result);
   } catch (error) {
     console.error("\nAgent failed with error:", error.message);
   }
