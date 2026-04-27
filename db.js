@@ -15,11 +15,6 @@ const db = new sqlite3.Database(dbPath, (err) => {
 
 function initializeSchema() {
   db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS conversations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-
     db.run(`CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       conversation_id INTEGER,
@@ -35,11 +30,25 @@ function initializeSchema() {
       }
     });
 
+    db.run(`CREATE TABLE IF NOT EXISTS prompts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content TEXT UNIQUE,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating prompts table:', err.message);
+      } else {
+        console.log('Prompts table initialized.');
+      }
+    });
+
     db.run(`CREATE TABLE IF NOT EXISTS code_snippets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       filename TEXT,
       content TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      prompt_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (prompt_id) REFERENCES prompts (id)
     )`, (err) => {
       if (err) {
         console.error('Error creating code_snippets table:', err.message);

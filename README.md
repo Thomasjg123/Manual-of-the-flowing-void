@@ -1,30 +1,69 @@
-# Project: Agent-Based Code Generation Testing
+# Agent Harness
 
-This project aims to test the reliability of LLM agents in generating valid Node.js/Express.js server code. The code is stored in a SQL database, and a manual testing process verifies the syntax and functionality.
+A lightweight Node.js implementation of a ReAct (Reasoning and Acting) agent capable of interacting with a SQLite database via tool calls.
 
-## Architecture
+## Overview
 
-### 1. Modular Agent System
-The core `Agent` has been refactored to be tool-agnostic. Instead of hardcoded tool logic, it uses a dynamic tool registry. This allows for the creation of specialized agents with different capabilities.
+The Agent Harness provides a framework where an LLM (Large Language Model) can perform complex tasks by reasoning about a user's request and choosing to use available tools. This project specifically implements a SQL tool, allowing the agent to query and manipulate a local SQLite database to answer questions or perform data-driven tasks.
 
-### 2. Specialized Agent: `serverNodejsCreator`
-A specific agent instance designed for one task:
-- **Goal**: Write a Node.js Express server configured to listen on `0.0.0.0:10001`.
-- **Tooling**: Equipped with a `sql_insert_code` tool to save the generated code into the database.
-- **Constraint**: No bash/shell access is provided to the agent to ensure security.
+## How it Works: The ReAct Pattern
 
-### 3. Testing Workflow (Manual)
-The testing is performed outside the agent loop to maintain a clean separation of concerns:
-1. **Generation**: The `serverNodejsCreator` agent writes the code and inserts it into the SQL table.
-2. **Extraction**: The code is retrieved from the database.
-3. **Verification**: A bash script performs the following:
-    - `node -c <file>`: Validates syntax.
-    - `node <file> &`: Runs the server in the background.
-    - `curl http://0.0.0.0:10001`: Tests the endpoint.
-    - `kill <pid>`: Cleans up the process.
+The core of the system is the **ReAct** loop implemented in `agent.js`. The agent follows these steps:
 
-## Success Metrics
-The failure rate is measured based on:
-- **Syntax Errors**: Code that fails the `node -c` check.
-- **Runtime Errors**: Code that fails the `curl` test.
-- **Tooling Errors**: Failures in the agent's ability to call the SQL tool correctly.
+1.  **Thought**: The agent sends the current conversation history (including system instructions) to the LLM.
+2.  **Action**: The LLM, guided by the system prompt, decides whether it needs to use a tool. It responds with a specific action format:
+    `Action: sql_query | Query: <your_sql_query>`
+3.  **Observation**: The harness intercepts this action, executes the SQL query using `sqlTool.js`, and captures the result (or any error). This result is appended back to the conversation as an `Observation: <result>`.
+4.  **Final Answer**: The agent repeats this loop until the LLM determines it has sufficient information to provide a final response, using the format:
+    `Final Answer: <your_answer>`
+
+## Features
+
+- **ReAct Agent Implementation**: A robust reasoning loop for tool-augmented LLM interaction.
+- **SQL Tooling**: A specialized tool for executing safe (validated) SQL queries against a SQLite database.
+- **Conversation Management**: Persistence of chat history and conversation state in a SQLite database.
+- **RESTful API**: An Express-based API to interact with the agent via HTTP.
+- **Real-time Logging**: Detailed console output of the agent's thought process and tool executions.
+
+## Technology Stack
+
+- **Runtime**: Node.js
+- **Framework**: Express.js
+- **Database**: SQLite3
+- **LLM Communication**: Axios (communicating with an OpenAI-compatible API)
+- **Core Logic**: ReAct pattern
+
+## Project Structure
+
+- `server.js`: The entry point and Express server configuration.
+- `agent.js`: The core ReAct agent logic and reasoning loop.
+- `chatService.js`: Manages conversation state and database persistence.
+- `sqlTool.js`: The implementation of the SQL execution tool.
+- `db.js`: Database connection and utility functions.
+- `queryValidator.js`: Security layer to validate SQL queries.
+- `public/`: Frontend assets for the web interface.
+
+## Installation
+
+1. Clone the repository.
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+3. Configure environment variables in a `.env` file:
+   ```env
+   TARGET_ENDPOINT=your_llm_api_endpoint
+   PORT=3000
+   ```
+
+## Usage
+
+Start the server:
+```bash
+node server.js
+```
+
+The API endpoints are:
+- `POST /v1/conversations`: Start a new conversation.
+- `POST /v1/chat/:conversationId`: Send a message to the agent.
+- `GET /v1/history/:conversationId`: Retrieve the chat history.

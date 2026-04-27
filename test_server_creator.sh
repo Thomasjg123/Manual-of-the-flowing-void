@@ -44,7 +44,7 @@ for ID in $IDS; do
     PROMPT="[No prompt recorded]"
   fi
 
-  echo "📝 Prompt: $PROMPT"
+  echo "📝 CODE: $ID"
 
   if [ -z "$CODE" ]; then
     echo "  ❌ FAIL - Empty snippet"

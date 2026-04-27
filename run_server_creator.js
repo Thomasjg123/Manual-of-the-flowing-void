@@ -1,26 +1,39 @@
-const Agent = require('./agent');
-const { sqlInsertCode } = require('./tools/specializedTools');
 const { executeSql } = require('./sqlTool');
+const axios = require('axios');
+require('dotenv').config();
 
-// Define the tools for this agent
-const tools = {
-  sql_insert_code: (args) => sqlInsertCode({ ...args, prompt_id: args.prompt_id || id }),
-  sql_query: executeSql
-};
+const TARGET_ENDPOINT = process.env.TARGET_ENDPOINT || 'http://192.168.1.14:8080/v1/chat/completions';
 
-async function saveCodeToDatabase(promptId, content) {
+async function callLLM(messages) {
   try {
-    // Strip HTML tags and escape single quotes for SQL
-    const cleanedContent = content
-      .replace(/<code[^>]*>/g, '')
-      .replace(/<\/code>/g, '')
-      .replace(/\\'/g, "'")  // Unescape backslash-escaped quotes
-      .replace(/''/g, "'");   // Fix double single quotes from agent
-    
-    const finalContent = cleanedContent.replace(/'/g, "''");
-    const insertQuery = `INSERT INTO code_snippets (filename, content, prompt_id) VALUES ('server.js', '${finalContent}', ${promptId})`;
+    const response = await axios.post(TARGET_ENDPOINT, {
+      model: 'gpt-4',
+      messages: messages,
+      temperature: 0,
+    });
+    return response.data.choices[0].message.content;
+  } catch (error) {
+    console.error('Error calling LLM:', error.response ? error.response.data : error.message);
+    throw new Error('Failed to communicate with LLM.');
+  }
+}
+
+function extractCodeFromResponse(response) {
+  const codeBlockRegex = /<code[^>]*>([\s\S]*?)<\/code>/;
+  const match = response.match(codeBlockRegex);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  console.warn('No <code> tags found in LLM response, using full response.');
+  return response.trim();
+}
+
+async function saveCodeToDatabase(promptId, code) {
+  try {
+    const escapedCode = code.replace(/'/g, "''");
+    const insertQuery = `INSERT INTO code_snippets (filename, content, prompt_id) VALUES ('server.js', '${escapedCode}', ${promptId})`;
     await executeSql(insertQuery);
-    console.log(`Code saved to database with prompt_id: ${promptId}`);
+    console.log(`Code saved to database with prompt ID: ${promptId}`);
   } catch (error) {
     console.error(`Error saving to database: ${error.message}`);
   }
@@ -49,15 +62,20 @@ async function main() {
     process.exit(1);
   }
 
-  const systemPrompt = `Your current prompt ID is ${id}. When using sql_insert_code, if you want to link to this prompt, use prompt_id: ${id} instead of prompt: <string>.`;
-  const agent = new Agent(systemPrompt, tools);  
-  
+  const messages = [
+    { role: 'user', content: userPrompt }
+  ];
+
   console.log(`Starting serverNodejsCreator agent with prompt ID ${id}...`);
   try {
-    const result = await agent.run(userPrompt);
-    console.log("\nAgent finished with result:", result);
-    // Automatically save the result to database
-    await saveCodeToDatabase(id, result);
+    const llmResponse = await callLLM(messages);
+    console.log(`\n--- LLM Response ---\n${llmResponse}`);
+
+    const code = extractCodeFromResponse(llmResponse);
+    console.log(`\n--- Extracted Code ---\n${code}`);
+
+    await saveCodeToDatabase(id, code);
+    console.log("\nDone.");
   } catch (error) {
     console.error("\nAgent failed with error:", error.message);
   }
