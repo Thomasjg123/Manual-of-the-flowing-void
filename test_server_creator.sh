@@ -3,11 +3,15 @@
 # Usage: ./run_and_test.sh [db_path]
 DB=${1:-database.sqlite}
 
+# --- Ensure columns exist ---
+sqlite3 "$DB" "ALTER TABLE code_snippets ADD COLUMN compile INTEGER DEFAULT 0;" 2>/dev/null
+sqlite3 "$DB" "ALTER TABLE code_snippets ADD COLUMN function INTEGER DEFAULT 0;" 2>/dev/null
+
 # --- Get all IDs from the table ---
-IDS=$(sqlite3 "$DB" "SELECT id FROM code_snippets;")
+IDS=$(sqlite3 "$DB" "SELECT id FROM code_snippets WHERE function = 0;")
 if [ -z "$IDS" ]; then
-  echo "❌ No snippets found in $DB"
-  exit 1
+  echo "✅ All snippets have already been tested."
+  exit 0
 fi
 
 # --- curl test function ---
@@ -74,6 +78,7 @@ for ID in $IDS; do
     continue
   else
     echo "  ✅ PASS - Syntax OK"
+    sqlite3 "$DB" "UPDATE code_snippets SET compile = 1 WHERE id = $ID;"
   fi
 
   # --- Start server ---
@@ -93,6 +98,7 @@ for ID in $IDS; do
     (( FAIL_TOTAL++ ))
   else
     (( PASS_TOTAL++ ))
+    sqlite3 "$DB" "UPDATE code_snippets SET function = 1 WHERE id = $ID;"
   fi
 
   # --- Cleanup ---

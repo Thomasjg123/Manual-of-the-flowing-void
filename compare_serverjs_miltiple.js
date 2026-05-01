@@ -4,24 +4,23 @@ const { execSync } = require('child_process');
 
 const DB = process.argv[2] || 'database.sqlite';
 
-// Get all IDs
-const rows = execSync(`sqlite3 ${DB} "SELECT id FROM code_snippets;"`).toString().trim().split('\n');
+// Fetch IDs and prompt_ids
+const idPromptRowsRaw = execSync(`sqlite3 -separator '|' ${DB} "SELECT cs.id, p.id FROM code_snippets cs JOIN prompts p ON cs.prompt_id = p.id;"`).toString().trim();
 
-if (!rows.length) {
+if (!idPromptRowsRaw) {
   console.log('❌ No snippets found.');
   process.exit(1);
 }
 
-// Fetch all snippets
-const snippets = rows.map(id => ({
-  id,
-  content: execSync(`sqlite3 ${DB} "SELECT content FROM code_snippets WHERE id = ${id};"`).toString().trim()
-}));
+const idPromptRows = idPromptRowsRaw.split('\n');
+
+const snippets = idPromptRows.map(row => {
+  const [id, prompt_id] = row.split('|');
+  const content = execSync(`sqlite3 ${DB} "SELECT content FROM code_snippets WHERE id = ${id};"`).toString().trim();
+  return { id, prompt_id, content };
+});
 
 console.log(`\n📦 Found ${snippets.length} snippet(s)\n`);
-
-const reference = snippets[0];
-console.log(`📌 Reference: ID ${reference.id}\n`);
 
 // Levenshtein distance
 function levenshtein(a, b) {
@@ -44,31 +43,58 @@ function similarity(a, b) {
   return maxLen === 0 ? 100 : (((maxLen - dist) / maxLen) * 100).toFixed(1);
 }
 
-// Compare all to reference
-const results = [];
+// Group snippets by prompt_id
+const groups = {};
+for (const s of snippets) {
+  if (!groups[s.prompt_id]) groups[s.prompt_id] = [];
+  groups[s.prompt_id].push(s);
+}
+
+// 1. Intra-prompt comparison
+console.log('🔍 Intra-prompt comparisons:');
+let intraCount = 0;
+for (const [promptId, group] of Object.entries(groups)) {
+  if (group.length > 1) {
+    console.log(`\n  Prompt ID: ${promptId}`);
+    for (let i = 1; i < group.length; i++) {
+      const pct = parseFloat(similarity(group[0].content, group[i].content));
+      const bar = '█'.repeat(Math.round(pct / 5)).padEnd(20, '░');
+      console.log(`    ID ${String(group[i].id).padEnd(4)} : ${bar} ${pct}% (vs ID ${group[0].id})`);
+      intraCount++;
+    }
+  }
+}
+if (intraCount === 0) console.log('  (No multiple snippets for the same prompt)');
+
+// 2. Inter-prompt comparison (first snippet vs others with different prompt)
+const firstSnippet = snippets[0];
+console.log(`\n\n🚀 Inter-prompt comparisons (Reference: ID ${firstSnippet.id}, Prompt: ${firstSnippet.prompt_id}):`);
+const interResults = [];
 for (let i = 1; i < snippets.length; i++) {
-  const pct = parseFloat(similarity(reference.content, snippets[i].content));
-  results.push({ id: snippets[i].id, pct });
+  if (snippets[i].prompt_id !== firstSnippet.prompt_id) {
+    const pct = parseFloat(similarity(firstSnippet.content, snippets[i].content));
+    interResults.push({ id: snippets[i].id, pct });
+  }
 }
 
-// Sort by similarity descending
-results.sort((a, b) => b.pct - a.pct);
+if (interResults.length > 0) {
+  interResults.sort((a, b) => b.pct - a.pct);
+  for (const { id, pct } of interResults) {
+    const bar = '█'.repeat(Math.round(pct / 5)).padEnd(20, '░');
+    const flag = pct < 50 ? ' ⚠️' : '';
+    console.log(`  ID ${String(id).padEnd(4)} : ${bar} ${pct}%${flag}`);
+  }
 
-// Print all
-for (const { id, pct } of results) {
-  const bar = '█'.repeat(Math.round(pct / 5)).padEnd(20, '░');
-  const flag = pct < 50 ? ' ⚠️' : '';
-  console.log(`  ID ${String(id).padEnd(4)} : ${bar} ${pct}%${flag}`);
-}
-
-// Summary
-const avg = (results.reduce((s, r) => s + r.pct, 0) / results.length).toFixed(1);
-const most_similar = results[0];
-const most_different = results[results.length - 1];
-
-console.log(`
-📊 Summary (vs ID ${reference.id})
+  // Summary for inter-prompt
+  const avg = (interResults.reduce((s, r) => s + r.pct, 0) / interResults.length).toFixed(1);
+  const most_similar = interResults[0];
+  const most_different = interResults[interResults.length - 1];
+  console.log(`
+📊 Inter-prompt Summary (vs ID ${firstSnippet.id})
   Average similarity : ${avg}%
   Most similar       : ID ${most_similar.id} at ${most_similar.pct}%
   Most different     : ID ${most_different.id} at ${most_different.pct}%
-`);
+  `);
+} else {
+  console.log('  (No snippets with different prompts found)');
+}

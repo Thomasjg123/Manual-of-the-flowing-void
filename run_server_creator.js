@@ -24,8 +24,7 @@ function extractCodeFromResponse(response) {
   if (match && match[1]) {
     return match[1].trim();
   }
-  console.warn('No <code> tags found in LLM response, using full response.');
-  return response.trim();
+  return null;
 }
 
 async function saveCodeToDatabase(promptId, code) {
@@ -36,6 +35,7 @@ async function saveCodeToDatabase(promptId, code) {
     console.log(`Code saved to database with prompt ID: ${promptId}`);
   } catch (error) {
     console.error(`Error saving to database: ${error.message}`);
+    throw error;
   }
 }
 
@@ -68,16 +68,40 @@ async function main() {
 
   console.log(`Starting serverNodejsCreator agent with prompt ID ${id}...`);
   try {
-    const llmResponse = await callLLM(messages);
-    console.log(`\n--- LLM Response ---\n${llmResponse}`);
+    let llmResponse;
+    try {
+      llmResponse = await callLLM(messages);
+    } catch (error) {
+      await saveCodeToDatabase(id, "This does not produce useable code");
+      throw error;
+    }
 
-    const code = extractCodeFromResponse(llmResponse);
+    let code = extractCodeFromResponse(llmResponse);
+
+    if (!code) {
+      console.log("No <code> tags found in LLM response, retrying...");
+      try {
+        llmResponse = await callLLM(messages);
+        code = extractCodeFromResponse(llmResponse);
+      } catch (error) {
+        await saveCodeToDatabase(id, "This does not produce useable code");
+        throw error;
+      }
+    }
+
+    if (!code) {
+      await saveCodeToDatabase(id, "This does not produce useable code");
+      throw new Error("No <code> tags found in LLM response after retry.");
+    }
+
+    console.log(`\n--- LLM Response ---\n${llmResponse}`);
     console.log(`\n--- Extracted Code ---\n${code}`);
 
     await saveCodeToDatabase(id, code);
     console.log("\nDone.");
   } catch (error) {
     console.error("\nAgent failed with error:", error.message);
+    process.exit(1);
   }
 }
 
